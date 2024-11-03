@@ -136,3 +136,6 @@ to intervene to uphold that code of conduct.
 
 [CoC]: https://www.rust-lang.org/policies/code-of-conduct
 [team]: https://github.com/rust-embedded/wg#the-cortex-m-team
+getfacl to get info of udev on device
+dfu-util -D ./stm32h523.bin -a 0 -s 0x08000000
+arm-none-eabi-objcopy -O binary stm32h523 stm32h523.bin

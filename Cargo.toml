@@ -2,7 +2,7 @@
 authors = ["Alberto Damo <alberto.damo@gmail.com>"]
 edition = "2018"
 readme = "README.md"
-name = "strr"
+name = "stm32h523"
 version = "0.1.0"
 
 [dependencies]
@@ -27,7 +27,7 @@ stm32h5xx-hal = {git = "https://github.com/stm32-rs/stm32h5xx-hal.git", features
 
 # this lets you use `cargo fix`!
 [[bin]]
-name = "strr"
+name = "stm32h523"
 test = false
 bench = false
 
