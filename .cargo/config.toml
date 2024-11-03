@@ -12,6 +12,8 @@ rustflags = [
   # "-C", "link-arg=-Tdefmt.x", #TODO: add the rt-support
 ]
 # runner = 'probe-rs run --protocol swd --verify --chip STM32H563IITx --speed 500'
+# "arm-none-eabi-objcopy -O binary"
+runner ="sh post_build.sh"
 
 [build]
 # Pick ONE of these default compilation targets
