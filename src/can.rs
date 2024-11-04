@@ -58,6 +58,9 @@ impl CanBase {
         if INITDONE.load(Ordering::Acquire){
             return Err(())
         }
+
+
+
         todo!()
     }
 
