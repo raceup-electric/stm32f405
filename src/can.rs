@@ -19,11 +19,11 @@ impl Frame for CanBase{
         if ld > DATA_BUFFER_SIZE{
             return None
         }
-        let mut buff = [0;DATA_BUFFER_SIZE];
+        let mut frame = Self{id:id.into(), dlc: ld,data:[0;DATA_BUFFER_SIZE]};
         for i in 0..ld{
-            buff[i] = data[i];
+            frame.data[i] = data[i];
         }
-        Some(Self{id:id.into(), dlc: ld,data:buff})
+        Some(frame)
     }
 
     fn new_remote(_id: impl Into<Id>, _dlc: usize) -> Option<Self> {
