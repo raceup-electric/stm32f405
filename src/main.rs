@@ -14,6 +14,7 @@ use stm32h5xx_hal;
 
 #[entry]
 fn main() -> ! {
+    //TODO: init clock
     init_heap();
     init_can().unwrap();
     let _ics = ICSCanBase::<Bst,can::CanBase>::new(0x600, 2, CanBase::send);
