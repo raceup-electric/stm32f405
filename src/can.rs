@@ -1,10 +1,11 @@
 use embedded_can::{Frame,Id};
+use core::sync::atomic::{AtomicBool,Ordering};
 
-pub fn init_can() -> Result<(),()>{
-    todo!()
-}
+
+#[allow(unused)]
 
 const DATA_BUFFER_SIZE : usize = 8;
+static INITDONE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 pub struct CanBase {
@@ -39,7 +40,7 @@ impl Frame for CanBase{
     }
 
     fn id(&self) -> Id {
-        self.id.into()
+        self.id
     }
 
     fn dlc(&self) -> usize {
@@ -53,11 +54,24 @@ impl Frame for CanBase{
 
 #[allow(unused)]
 impl CanBase {
+    pub fn init_can() -> Result<(),()>{
+        if INITDONE.load(Ordering::Acquire){
+            return Err(())
+        }
+        todo!()
+    }
+
     pub fn send(&self) -> Result<(),()>{
+        if !INITDONE.load(Ordering::Acquire) {
+            return Err(())
+        }
         todo!();
     }
 
-    pub fn recv(&self) ->CanBase{
-        todo!();
+    pub fn recv() ->Result<CanBase,()>{
+        if !INITDONE.load(Ordering::Acquire){
+            return Err(())
+        }
+        todo!()
     }
 }
