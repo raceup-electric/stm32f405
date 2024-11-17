@@ -2,7 +2,7 @@
 
 target=$1
 
-work_dir="./target/thumbv8m.main-none-eabihf/debug"
+work_dir="./target/thumbv7em-none-eabihf/debug"
 
 arm-none-eabi-objcopy -O binary $target $target.bin
 

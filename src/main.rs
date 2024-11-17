@@ -1,61 +1,78 @@
+//! CDC-ACM serial port example using polling in a busy loop.
+//! Target board: any STM32F4 with a OTG FS peripheral and a 25MHz HSE crystal
 #![no_std]
 #![no_main]
 
-mod global_allocator;
+use panic_halt as _;
 
-use global_allocator::init_heap;
-use panic_halt as _; 
 use cortex_m_rt::entry;
-#[allow(unused)]
-use stm32f4xx_hal::{pac, prelude::*, gpio, uart::Serial};
+use stm32f4xx_hal::otg_fs::{UsbBus, USB};
+use stm32f4xx_hal::{pac, prelude::*};
+use usb_device::prelude::*;
 
-#[allow(unused)]
-use core::fmt::Write;
-
-extern crate alloc;
-#[allow(unused)]
-use alloc::vec::Vec;
+static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
 #[entry]
 fn main() -> ! {
-    init_heap();
-
     let dp = pac::Peripherals::take().unwrap();
-    
-    let gpioa = dp.GPIOA.split();
 
     let rcc = dp.RCC.constrain();
 
-    let _gpiob = dp.GPIOB.split();
+    let clocks = rcc
+        .cfgr
+        .use_hse(25.MHz())
+        .sysclk(48.MHz())
+        .require_pll48clk()
+        .freeze();
 
-    let gpioc = dp.GPIOC.split();
+    let gpioa = dp.GPIOA.split();
 
-    let clocks = rcc.cfgr.use_hse(25.MHz()).freeze();
+    let usb = USB::new(
+        (dp.OTG_FS_GLOBAL, dp.OTG_FS_DEVICE, dp.OTG_FS_PWRCLK),
+        (gpioa.pa11, gpioa.pa12),
+        &clocks,
+    );
+    #[allow(static_mut_refs)]
+    let usb_bus = UsbBus::new(usb, unsafe { &mut EP_MEMORY });
 
-    let mut _delay = dp.TIM1.delay_ms(&clocks);
+    let mut serial = usbd_serial::SerialPort::new(&usb_bus);
 
-    let mut led = gpioc.pc12.into_push_pull_output();
-
-    let tx_pin = gpioa.pa9;
-
-    let _rx_pin = gpioa.pa10;
-
-    let mut tx: stm32f4xx_hal::uart::Tx<pac::USART1, u8> = Serial::tx(dp.USART1, tx_pin, 115200.bps(), &clocks).unwrap();
-
-    //let mut rx: stm32f4xx_hal::uart::Rx<pac::USART1, u8> = Serial::rx(dp.USART1, rx_pin, 115200.bps(), &clocks).unwrap();
-
-    let mut value: u8 = 0;
+    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x0483, 0x3748))
+        .device_class(usbd_serial::USB_CLASS_CDC)
+        .strings(&[StringDescriptors::default()
+            .manufacturer("Fake Company")
+            .product("Product")
+            .serial_number("TEST")])
+        .unwrap()
+        .build();
 
     loop {
-        // print some value every 500 ms, value will overflow after 255
-        writeln!(tx, "value: {value:02}\r").unwrap();
-        value = value.wrapping_add(1);
-        
-        for _ in 0..10_000 {
-            led.set_high();
+        if !usb_dev.poll(&mut [&mut serial]) {
+            continue;
         }
-        for _ in 0..10_000 {
-            led.set_low();
+
+        let mut buf = [0u8; 64];
+
+        match serial.read(&mut buf) {
+            Ok(count) if count > 0 => {
+                // Echo back in upper case
+                for c in buf[0..count].iter_mut() {
+                    if 0x61 <= *c && *c <= 0x7a {
+                        *c &= !0x20;
+                    }
+                }
+
+                let mut write_offset = 0;
+                while write_offset < count {
+                    match serial.write(&buf[write_offset..count]) {
+                        Ok(len) if len > 0 => {
+                            write_offset += len;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
