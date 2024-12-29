@@ -1,11 +1,8 @@
-use embassy_executor::{Executor, Spawner};
+use embassy_executor::Executor;
 use static_cell::StaticCell;
+use logic_root::main_taks;
 
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-
-#[embassy_executor::task]
-async fn main_taks(spawner: Spawner){
-}
 
 fn main() {
     let executor = EXECUTOR.init(Executor::new());
