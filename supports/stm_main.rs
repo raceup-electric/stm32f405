@@ -1,15 +1,18 @@
-use embassy_executor::{Executor, Spawner};
-use static_cell::StaticCell;
+#![no_std]
+#![no_main]
 
-// Import logic_main as a crate-level module
-use crate::logic_main::main_task;
+use embassy_executor::Spawner;
+#[allow(unused_imports)]
+use embassy_futures::join::join;
+#[allow(unused_imports)]
+use embassy_stm32::{bind_interrupts, peripherals, usb, Config};
+use defmt::info;
+use {defmt_rtt as _, panic_probe as _};
+use logic_root::main_taks;
 
-static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-
-fn main() {
-    let executor = EXECUTOR.init(Executor::new());
-    executor.run(|spawner| {
-        spawner.spawn(main_task(spawner)).unwrap();
-    });
+#[embassy_executor::main]
+async fn main(_spawner: Spawner) {
+    main_taks();    
 }
+
 
