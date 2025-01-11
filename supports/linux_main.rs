@@ -1,6 +1,7 @@
 use embassy_executor::Executor;
 use static_cell::StaticCell;
 use logic_root::main_taks;
+use driver::*;
 
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
 

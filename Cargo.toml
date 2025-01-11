@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    "driver"
+]
+
+[dependencies]
+driver = { path = "./driver" }  # Add dependency on the driver crate
+
 [package]
 name = "virtual_embassy_test"
 version = "0.1.0"
@@ -45,4 +53,3 @@ debug = 2
 [lib]
 name = "logic_root"
 path = "src/lib.rs"
-
