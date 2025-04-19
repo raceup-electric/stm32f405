@@ -1,106 +1,135 @@
-//! CDC-ACM serial port example using polling in a busy loop.
-//! Target board: any STM32F4 with a OTG FS peripheral and a 25MHz HSE crystal
 #![no_std]
 #![no_main]
 
-use panic_halt as _;
+use defmt::{panic, *};
+use embassy_executor::Spawner;
+use embassy_futures::join::join;
+use embassy_stm32::time::Hertz;
+use embassy_stm32::usb::{Driver, Instance};
+use embassy_stm32::{bind_interrupts, peripherals, usb, Config};
+use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
+use embassy_usb::driver::EndpointError;
+use embassy_usb::Builder;
+use {defmt_rtt as _, panic_probe as _};
 
-use cortex_m_rt::entry;
-use stm32f4xx_hal::otg_fs::{UsbBus, USB};
-use stm32f4xx_hal::{pac, prelude::*};
-use usb_device::{prelude::*, device::UsbRev};
+bind_interrupts!(struct Irqs {
+    OTG_FS => usb::InterruptHandler<peripherals::USB_OTG_FS>;
+});
 
-static mut EP_MEMORY: [u32; 1024] = [0; 1024];
+// If you are trying this and your USB device doesn't connect, the most
+// common issues are the RCC config and vbus_detection
+//
+// See https://embassy.dev/book/#_the_usb_examples_are_not_working_on_my_board_is_there_anything_else_i_need_to_configure
+// for more information.
+#[embassy_executor::main]
+async fn main(_spawner: Spawner) {
+    info!("Hello World!");
 
-#[entry]
-fn main() -> ! {
-    let dp = pac::Peripherals::take().unwrap();
+    let mut config = Config::default();
+    {
+        use embassy_stm32::rcc::*;
+        config.rcc.hse = Some(Hse {
+            freq: Hertz(12_000_000),
+            mode: HseMode::Oscillator, // or HseMode::Oscillator if you're using a crystal
+        });
 
-    let rcc = dp.RCC.constrain();
+        config.rcc.pll_src = PllSource::HSE;
+        config.rcc.pll = Some(Pll {
+            prediv: PllPreDiv::DIV6,   // 12 / 6 = 2 MHz
+            mul: PllMul::MUL168,       // 2 * 168 = 336 MHz
+            divp: Some(PllPDiv::DIV2), // 336 / 2 = 168 MHz
+            divq: Some(PllQDiv::DIV7), // 336 / 7 = 48 MHz
+            divr: None,
+        });
 
-    let clocks = rcc.cfgr
-        .use_hse(8.MHz()) // Match your hardware
-        .sysclk(168.MHz())
-        .hclk(168.MHz())
-        .pclk1(42.MHz())
-        .pclk2(84.MHz())
-        .require_pll48clk() // Ensures 48 MHz for USB
-        .freeze();
+        config.rcc.ahb_pre = AHBPrescaler::DIV1;
+        config.rcc.apb1_pre = APBPrescaler::DIV4;
+        config.rcc.apb2_pre = APBPrescaler::DIV2;
 
-    let gpioa = dp.GPIOA.split();
-    let gpioc = dp.GPIOC.split();
+        config.rcc.sys = Sysclk::PLL1_P;
+        config.rcc.mux.clk48sel = mux::Clk48sel::PLL1_Q;
+    }
+    let p = embassy_stm32::init(config);
 
-    let mut usb_dev = gpioc.pc11.into_push_pull_output();
-    usb_dev.set_low();
+    let mut ep_out_buffer = [0u8; 256];
+    let mut config = embassy_stm32::usb::Config::default();
 
-    let usb = USB::new(
-        (dp.OTG_FS_GLOBAL, dp.OTG_FS_DEVICE, dp.OTG_FS_PWRCLK),
-        (gpioa.pa11, gpioa.pa12),
-        &clocks,
+    // Do not enable vbus_detection. This is a safe default that works in all boards.
+    // However, if your USB device is self-powered (can stay powered on if USB is unplugged), you need
+    // to enable vbus_detection to comply with the USB spec. If you enable it, the board
+    // has to support it or USB won't work at all. See docs on `vbus_detection` for details.
+    config.vbus_detection = false;
+
+    let driver = Driver::new_fs(p.USB_OTG_FS, Irqs, p.PA12, p.PA11, &mut ep_out_buffer, config);
+
+    // Create embassy-usb Config
+    let mut config = embassy_usb::Config::new(0xc0de, 0xcafe);
+    config.manufacturer = Some("Embassy");
+    config.product = Some("USB-serial example");
+    config.serial_number = Some("12345678");
+
+    // Create embassy-usb Config
+    let mut config = embassy_usb::Config::new(0xc0de, 0xcafe);
+    config.manufacturer = Some("RUSTBELLISSIMO");
+    config.product = Some("CRACCOGAYYYYYY");
+    config.serial_number = Some("12345678");
+
+    let mut config_descriptor = [0; 256];
+    let mut bos_descriptor = [0; 256];
+    let mut control_buf = [0; 64];
+
+    let mut state = State::new();
+
+    let mut builder = Builder::new(
+        driver,
+        config,
+        &mut config_descriptor,
+        &mut bos_descriptor,
+        &mut [], // no msos descriptors
+        &mut control_buf,
     );
 
-    #[allow(static_mut_refs)]
-    let usb_bus = UsbBus::new(usb, unsafe { &mut EP_MEMORY });
+    // Create classes on the builder.
+    let mut class = CdcAcmClass::new(&mut builder, &mut state, 64);
 
-    let mut serial = usbd_serial::SerialPort::new(&usb_bus);
+    // Build the builder.
+    let mut usb = builder.build();
 
-    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x0483, 0x5710))
-        .device_class(0x02)         // CDC (Communications Device Class)
-        .device_sub_class(0x00)         // Subclass, typically 0x00 for CDC ACM
-        .device_protocol(0x00)          // Protocol, 0x00 for default CDC ACM
-        .device_release(0x0100)         // Device release version: 1.00
-        .self_powered(false)            // The device is bus-powered (not self-powered)
-        .supports_remote_wakeup(false)  // The device does not support remote wakeup
-        .usb_rev(UsbRev::Usb200)
-        .max_packet_size_0(64)
-        .unwrap()
-        .strings(&[StringDescriptors::default()
-            .manufacturer("GDMicroelectronics")
-            .product("GD32 DFU Bootloader")
-            .serial_number("try")])
-        .unwrap()
-        .max_power(200)
-        .unwrap()
-        .build();
+    // Run the USB device.
+    let usb_fut = usb.run();
 
-    let mut led = gpioc.pc12.into_push_pull_output();
-    led.set_high();
+    // Do stuff with the class!
+    let echo_fut = async {
+        loop {
+            class.wait_connection().await;
+            info!("Connected");
+            let _ = echo(&mut class).await;
+            info!("Disconnected");
+        }
+    };
 
-    if (clocks.pll48clk()) != core::prelude::v1::Some(48.MHz()) {
-        led.set_low();// Indicate error (e.g., turn on a red LED)
+    // Run everything concurrently.
+    // If we had made everything `'static` above instead, we could do this using separate tasks instead.
+    join(usb_fut, echo_fut).await;
+}
+
+struct Disconnected {}
+
+impl From<EndpointError> for Disconnected {
+    fn from(val: EndpointError) -> Self {
+        match val {
+            EndpointError::BufferOverflow => panic!("Buffer overflow"),
+            EndpointError::Disabled => Disconnected {},
+        }
     }
+}
 
+async fn echo<'d, T: Instance + 'd>(class: &mut CdcAcmClass<'d, Driver<'d, T>>) -> Result<(), Disconnected> {
+    let mut buf = [0; 64];
     loop {
-        if !usb_dev.poll(&mut [&mut serial]) {
-            //led.toggle();
-            cortex_m::asm::delay(10);
-            continue;
-
-        }
-
-        let mut buf = [0u8; 64];
-
-        match serial.read(&mut buf) {
-            Ok(count) if count > 0 => {
-                led.set_high();
-                // Echo back in upper case
-                for c in buf[0..count].iter_mut() {
-                    if 0x61 <= *c && *c <= 0x7a {
-                        *c &= !0x20;
-                    }
-                }
-
-                let mut write_offset = 0;
-                while write_offset < count {
-                    match serial.write(&buf[write_offset..count]) {
-                        Ok(len) if len > 0 => {
-                            write_offset += len;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
+        let n = class.read_packet(&mut buf).await?;
+        let data = &buf[..n];
+        info!("data: {:x}", data);
+        class.write_packet(data).await?;
     }
 }
